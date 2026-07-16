@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 from homeassistant.components import bluetooth
 from homeassistant.exceptions import ConfigEntryNotReady
@@ -200,20 +202,39 @@ class BJLEDInstance:
         profile = device_profile_from_ble_device(device)
         if profile is None:
             LOGGER.debug(
-                "Bluetooth device has an unrecognized name: %s. MAC: %s",
+                "Bluetooth device has an unrecognized profile: %s. MAC: %s",
                 device.name,
-                device.address
+                device.address,
+            )
+            raise ConfigEntryNotReady(
+                f"Unsupported or unrecognized Bluetooth profile for {device.name or device.address}"
             )
 
-        self._compiler = profile.compiler()
-        
-        if RGBCommand in profile.supported_commands:
+        compiler = getattr(profile, "compiler", None)
+        if compiler is None:
+            LOGGER.debug(
+                "Bluetooth device profile did not provide a compiler: %s. MAC: %s",
+                device.name,
+                device.address,
+            )
+            raise ConfigEntryNotReady(
+                f"Unsupported Bluetooth profile for {device.name or device.address}"
+            )
+
+        self._compiler = compiler() if callable(compiler) else compiler
+        if self._compiler is None:
+            raise ConfigEntryNotReady(
+                f"Unsupported Bluetooth profile for {device.name or device.address}"
+            )
+
+        supported_commands = getattr(profile, "supported_commands", ()) or ()
+        if RGBCommand in supported_commands:
             self._color_mode = ColorMode.RGB
-        elif BrightnessCommand in profile.supported_commands:
+        elif BrightnessCommand in supported_commands:
             self._color_mode = ColorMode.BRIGHTNESS
         else:
             self._color_mode = ColorMode.ONOFF
-        
+
         return profile
             
     async def _write_state(self):
